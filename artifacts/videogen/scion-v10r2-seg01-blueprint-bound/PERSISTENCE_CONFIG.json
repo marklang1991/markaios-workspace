@@ -1,0 +1,21 @@
+{
+  "schema": "markaios.videogen.persistence.v1",
+  "thread_id": "019fead9-3eef-72b1-8e36-78d2a4609f98",
+  "repository": "marklang1991/markaios-workspace",
+  "visibility": "PUBLIC",
+  "branch": "codex/videogen-019fead9-blueprint-bound",
+  "artifact_prefix": "artifacts/videogen/scion-v10r2-seg01-blueprint-bound/",
+  "manifest_path": "artifacts/_manifests/019fead9-3eef-72b1-8e36-78d2a4609f98.json",
+  "generation_defaults": {
+    "submit_by_default": false,
+    "duration_sec": 4,
+    "resolution": "720p",
+    "ratio": "16:9",
+    "generate_audio": false,
+    "input_roles": ["first_frame", "last_frame", "reference_video"],
+    "loose_reference_images": "FORBIDDEN"
+  },
+  "workflow": ["copy", "sha256_manifest", "commit", "push", "remote_verify"],
+  "retain_local_originals_until_remote_verification": true,
+  "uncleared_media_policy": "HOLD_HASH_POINTER_ONLY"
+}

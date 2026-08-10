@@ -1,0 +1,67 @@
+{
+  "schema": "markaios.artifact-manifest.v1",
+  "thread_id": "019fead9-3eef-72b1-8e36-78d2a4609f98",
+  "updated": "2026-08-10",
+  "repository": "marklang1991/markaios-workspace",
+  "branch": "codex/videogen-019fead9-blueprint-bound",
+  "authority_state": "PENDING_REMOTE_VERIFICATION",
+  "publication_policy": {
+    "repository_visibility": "PUBLIC",
+    "published_content": "sanitized documentation and manifests only",
+    "held_content": "media without explicit public-release clearance"
+  },
+  "published": [
+    {
+      "path": "artifacts/videogen/scion-v10r2-seg01-blueprint-bound/README.md",
+      "sha256": "7F466F908C985CAAFB885D9AD376E572E683E10A7140B0990D62375FABDDBD00"
+    },
+    {
+      "path": "artifacts/videogen/scion-v10r2-seg01-blueprint-bound/METHOD.md",
+      "sha256": "176599C72E648105B7453CA3FF24B746EE2F9276FB4FA1BE9943309D6304A33B"
+    },
+    {
+      "path": "artifacts/videogen/scion-v10r2-seg01-blueprint-bound/PERSISTENCE_CONFIG.json",
+      "sha256": "E70DE4AF49B8B3D15D8EA41B897ACA59480FA059531CB0454525CF0D4B52681B"
+    }
+  ],
+  "hold": [
+    {
+      "logical_pointer": "local://SEG01/blueprint/01_SCION_BLUEPRINT_15s.mp4",
+      "sha256": "60385E85BE944C5CDB6CC7B971190E898DE98E63554802D416E9A12726781128",
+      "bytes": 2300728,
+      "reason": "original blueprint media; public-release clearance not established"
+    },
+    {
+      "logical_pointer": "local://SEG01/E01/cgt-20260810230446-2fgvh.mp4",
+      "sha256": "990389B5C12F2DD8DB8C95325394286FA96C6D5708D31F822F342768715FB142",
+      "bytes": 18642578,
+      "status": "METHOD_INVALID_NO_REFERENCE_VALUE",
+      "reason": "generated media embeds uncleared source assets"
+    },
+    {
+      "logical_pointer": "local://SEG01/E01/cgt-20260810230446-2fgvh_SILENT_REVIEW_ONLY.mp4",
+      "sha256": "6C15FCB8040ECFB41AC97DE52B545F25C416DB701CAA0F4C9DDCFC16B5BED4C0",
+      "bytes": 18367933,
+      "status": "NEGATIVE_ONLY",
+      "reason": "review derivative embeds uncleared source assets"
+    },
+    {
+      "logical_pointer": "local://SEG01/E01/E01_SOURCE_VS_OUTPUT_5KEYS.png",
+      "sha256": "336A5BC935B45D2DDA4A64FF2A7B24A3809193EDC343839C73AD9F8F3C2FC488",
+      "bytes": 2023210,
+      "reason": "comparison sheet embeds blueprint and generated media"
+    },
+    {
+      "logical_pointer": "local://SEG01/E01/E01_CONTACTSHEET_15_ANCHORS.png",
+      "sha256": "1C6F8E39DDB5D3AE09C3E82B8E9616AA8FC67D20A06455EF6B304841EAACFB25",
+      "bytes": 2505771,
+      "reason": "contact sheet embeds generated media"
+    },
+    {
+      "logical_pointer": "local://SEG01/V10-approved-components",
+      "status": "HOLD_COLLECTION",
+      "reason": "character, weapon, enemy, and scene image bodies are not published without explicit public-release clearance; hashes remain in the local authority manifest"
+    }
+  ],
+  "local_originals_retained": true
+}
