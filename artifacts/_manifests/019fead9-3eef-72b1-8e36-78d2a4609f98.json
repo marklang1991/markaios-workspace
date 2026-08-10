@@ -4,7 +4,8 @@
   "updated": "2026-08-10",
   "repository": "marklang1991/markaios-workspace",
   "branch": "codex/videogen-019fead9-blueprint-bound",
-  "authority_state": "PENDING_REMOTE_VERIFICATION",
+  "authority_state": "REMOTE_VERIFIED",
+  "initial_remote_verified_commit": "99714ce9b471793a67c1efb79841ad3d9528cf1b",
   "publication_policy": {
     "repository_visibility": "PUBLIC",
     "published_content": "sanitized documentation and manifests only",
@@ -13,7 +14,7 @@
   "published": [
     {
       "path": "artifacts/videogen/scion-v10r2-seg01-blueprint-bound/README.md",
-      "sha256": "7F466F908C985CAAFB885D9AD376E572E683E10A7140B0990D62375FABDDBD00"
+      "sha256": "F3F71E1F17F5EFA32E357D49B2385E2E9E26D63E0211500B13AFED25A59F5EA9"
     },
     {
       "path": "artifacts/videogen/scion-v10r2-seg01-blueprint-bound/METHOD.md",

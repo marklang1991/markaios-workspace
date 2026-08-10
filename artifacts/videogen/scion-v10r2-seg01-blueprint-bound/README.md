@@ -1,7 +1,8 @@
 # SCION V10R2 SEG01 — Blueprint-Bound Keyframes
 
-Thread: `019fead9-3eef-72b1-8e36-78d2a4609f98`  
-Updated: 2026-08-10  
+Thread: `019fead9-3eef-72b1-8e36-78d2a4609f98`
+
+Updated: 2026-08-10
 State: `METHOD_CORRECTED / KEYFRAME_FIRST / NO_MEDIA_PUBLISHED`
 
 The production target and QA baseline are unchanged. The current unit of work is a final-art keyframe bound to the exact pixel space of its matching blueprint frame. A 2–3 second same-shot review clip is optional only after adjacent final keyframes have passed all gates.
