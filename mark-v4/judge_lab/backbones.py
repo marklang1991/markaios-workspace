@@ -71,7 +71,7 @@ class _HFBackbone(Backbone):
         if device == "auto":
             if torch.cuda.is_available():
                 device = "cuda"
-            elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            elif getattr(getattr(getattr(torch, "backends", None), "mps", None), "is_available", lambda: False)():
                 device = "mps"  # Apple silicon (Mac Studio)
             else:
                 device = "cpu"
