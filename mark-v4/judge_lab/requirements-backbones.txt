@@ -1,0 +1,7 @@
+# Real backbones (siglip2 / dinov2 / clip_l). Install torch with the CUDA build for your GPU first:
+#   RTX 4060 Ti: any CUDA 12.x build
+#   RTX 5080 (Blackwell, sm_120): needs a CUDA 12.8+ build, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+-r requirements.txt
+torch>=2.7
+transformers>=4.49

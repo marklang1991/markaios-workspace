@@ -1,0 +1,11 @@
+{
+  "_comment": "左边是 judge_lab 的标准字段名，右边是你日志里的实际字段名（支持 a.b 嵌套路径）。没写的字段沿用默认名。",
+  "id": "image_id",
+  "image": "file",
+  "decision": "verdict",
+  "reasons": "fail_items",
+  "scores": "item_scores",
+  "versions": "meta.versions",
+  "scene": "meta.scene",
+  "decision_values": {"pass": ["pass", "通过"], "fail": ["fail", "不通过"]}
+}

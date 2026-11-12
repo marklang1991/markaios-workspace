@@ -1,0 +1,31 @@
+{
+  "version": "heads_v1",
+  "_comment": "kind: hard = 硬门槛（不合格无分数）; score = 评分项（0-10 分）。region: face|hand|body|tile|full。label_rule.max_score 为 null 时，勾选即为缺陷；设为数字（如 4）时，勾选且分数 <= 该值才算缺陷，勾选但分数更高的样本排除。trainable=false 的项目不自动训练，但仍出现在报告中。",
+  "defaults": {
+    "target_recall": {"hard": 0.95, "score": 0.80}
+  },
+  "items": {
+    "extra_person_or_limb": {"name": "多余的人或肢体", "kind": "hard", "region": "full", "label_rule": {"positive_if": "selected"}},
+    "structure_break": {"name": "结构断裂", "kind": "hard", "region": "tile", "label_rule": {"positive_if": "selected"}},
+    "floating_or_missing_part": {"name": "悬空或缺失部件", "kind": "hard", "region": "tile", "label_rule": {"positive_if": "selected"}},
+    "garbled_text": {"name": "乱码字", "kind": "hard", "region": "tile", "label_rule": {"positive_if": "selected"}, "note": "OCR 是主要工具，判官头可选"},
+    "wrong_fingers": {"name": "手指不对", "kind": "hard", "region": "hand", "label_rule": {"positive_if": "selected"}},
+    "limb_deform_or_clip": {"name": "肢体畸形或穿模", "kind": "hard", "region": "body", "fallback_region": "full", "label_rule": {"positive_if": "selected"}},
+    "not_same_person": {"name": "不是同一个人", "kind": "hard", "region": "face", "label_rule": {"positive_if": "selected"}, "note": "主要工具是人脸特征相似度，判官头可选"},
+    "age_too_young": {"name": "年龄不符合设定·偏小", "kind": "hard", "region": "face", "trainable": false, "label_rule": {"positive_if": "selected"}, "note": "不自动训练：由主人在审片页人工判断（暂不装年龄估计模型）"},
+    "age_too_old": {"name": "年龄不符合设定·偏大", "kind": "hard", "region": "face", "trainable": false, "label_rule": {"positive_if": "selected"}, "note": "不自动训练：由主人在审片页人工判断（暂不装年龄估计模型）"},
+
+    "skin_plastic": {"name": "皮肤塑料", "kind": "score", "region": "face", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "skin_dirty": {"name": "皮肤太脏", "kind": "score", "region": "face", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "makeup": {"name": "妆感", "kind": "score", "region": "face", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "face_unnatural": {"name": "脸不自然", "kind": "score", "region": "face", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "likeness": {"name": "像不像本人", "kind": "score", "region": "face", "label_rule": {"positive_if": "selected", "max_score": null}, "note": "主要工具是人脸特征相似度"},
+    "lighting": {"name": "光线", "kind": "score", "region": "full", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "focus_dof": {"name": "对焦与景深", "kind": "score", "region": "full", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "filter_heavy": {"name": "滤镜太重", "kind": "score", "region": "full", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "composition": {"name": "构图主体感", "kind": "score", "region": "full", "label_rule": {"positive_if": "selected", "max_score": null}},
+    "action_vs_storyboard": {"name": "动作和分镜不符", "kind": "score", "region": "full", "trainable": false, "label_rule": {"positive_if": "selected", "max_score": null}, "note": "语义判断，交给 VLM 审核"},
+    "physics": {"name": "物理不合理", "kind": "score", "region": "full", "trainable": false, "label_rule": {"positive_if": "selected", "max_score": null}, "note": "语义判断，交给 VLM 审核"},
+    "fabric_fake": {"name": "面料材质假", "kind": "score", "region": "tile", "label_rule": {"positive_if": "selected", "max_score": null}}
+  }
+}
