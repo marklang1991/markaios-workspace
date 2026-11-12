@@ -69,9 +69,14 @@ class _HFBackbone(Backbone):
             ) from e
         self.torch = torch
         if device == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+                device = "mps"  # Apple silicon (Mac Studio)
+            else:
+                device = "cpu"
         self.device = device
-        self.dtype = torch.float16 if (fp16 and device.startswith("cuda")) else torch.float32
+        self.dtype = torch.float16 if (fp16 and (device.startswith("cuda") or device == "mps")) else torch.float32
         # AutoImageProcessor = the image half of AutoProcessor (no tokenizer needed).
         self.processor = AutoImageProcessor.from_pretrained(model_path)
         self.model = AutoModel.from_pretrained(model_path).to(device=self.device, dtype=self.dtype).eval()
