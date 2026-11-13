@@ -1,4 +1,4 @@
-"""Per-defect linear heads: datasets, grouped CV, fitting, thresholds, head files.
+"""Per-defect linear heads: datasets, grouped CV (by scene when there are scenes), fitting, thresholds, head files.
 
 Multiple-instance simplification: an image with several crops (tiles, faces, hands)
 contributes ALL of its crops with the image-level label, for negatives and positives
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .data import HeadItem, Review, label_for, severity_weight
+from .data import HeadItem, Review, assess
 from .embeddings import RegionCache
 from .util import JudgeLabError, assert_no_exam, now_iso, read_json, sha256_ids, write_json
 
@@ -31,11 +31,18 @@ class ItemData:
     n_neg: int
     n_ambiguous: int
     n_no_crops: int
-    w: np.ndarray | None = None  # (n_crops,) fitting weight: the owner's severity score on positives
+    w: np.ndarray | None = None  # (n_crops,) fitting weight from data.assess (positives and negatives)
+    scenes: np.ndarray | None = None  # (n_crops,) scene of the crop's image, "" when it has none
 
     @property
     def image_ids(self) -> list[str]:
         return sorted(set(self.groups.tolist()))
+
+    def images(self) -> tuple[np.ndarray, np.ndarray, list[str]]:
+        """Per image (sorted by id): ids, labels, scenes ("" = none)."""
+        uniq, first = np.unique(self.groups, return_index=True)
+        scenes = [""] * len(uniq) if self.scenes is None else self.scenes[first].tolist()
+        return uniq, self.y[first], scenes
 
 
 def region_rows(caches: dict[str, RegionCache], region: str, fallback: str | None,
@@ -54,13 +61,16 @@ def needed_regions(items) -> set[str]:
 
 
 def build_item_data(item: HeadItem, reviews: list[Review], caches: dict[str, RegionCache],
-                    exclude_ids: set[str] | None = None) -> ItemData:
+                    exclude_ids: set[str] | None = None, labelled: bool = True) -> ItemData:
+    """One item's crops with the label and fitting weight data.assess gives each review.
+    labelled=False: every review that has crops, all labelled 0 (pictures to be scored, not fitted)."""
     if exclude_ids:
-        assert_no_exam((r.id for r in reviews), exclude_ids, f"build_item_data({item.id})")
-    Xs, ys, gs, ns, ws = [], [], [], [], []
+        assert_no_exam((r.id for r in reviews), exclude_ids, f"build_item_data({item.id})",
+                       hide={r.id for r in reviews if r.private})
+    Xs, ys, gs, ns, ws, ss = [], [], [], [], [], []
     pos = neg = amb = none = 0
     for r in reviews:
-        lab = label_for(r, item)
+        lab, _, weight = assess(r, item) if labelled else (0, "", 1.0)
         if lab is None:
             amb += 1
             continue
@@ -73,11 +83,12 @@ def build_item_data(item: HeadItem, reviews: list[Review], caches: dict[str, Reg
         Xs.append(cache.emb[rows])
         ys += [lab] * len(rows)
         gs += [r.id] * len(rows)
-        ws += [severity_weight(r, item) if lab else 1.0] * len(rows)
+        ws += [weight] * len(rows)
+        ss += [r.scene or ""] * len(rows)
         ns += cache.crop_names[rows].tolist()
     X = np.concatenate(Xs) if Xs else np.zeros((0, 0), np.float32)
     return ItemData(X, np.array(ys, int), np.array(gs, str), np.array(ns, str), pos, neg, amb, none,
-                    np.array(ws, float))
+                    np.array(ws, float), np.array(ss, str))
 
 
 # --------------------------------------------------------------------------- model
@@ -128,30 +139,142 @@ def grouped_folds(groups: np.ndarray, y: np.ndarray, k: int, seed: int = 0) -> n
     return np.array([lookup[g] for g in groups.tolist()], int)
 
 
-def oof_scores(d: ItemData, k: int, C: float, seed: int = 0) -> tuple[list[str], np.ndarray, np.ndarray]:
-    """Out-of-fold image-level scores. Returns (image_ids, labels, scores)."""
-    folds = grouped_folds(d.groups, d.y, k, seed)
+def scene_folds(d: ItemData, k: int, seed: int = 0) -> tuple[np.ndarray, int] | None:
+    """Stratified folds over SCENES, expanded to crops: every picture of a scene lands in the same fold, so a
+    head is always tested on scenes it has not seen. A picture without a scene is a group of its own.
+    k is lowered (down to 2) until every training split holds both classes; None if no k works."""
+    from sklearn.model_selection import StratifiedGroupKFold
+
+    uniq, img_y, scenes = d.images()
+    grp = np.array([s if s else f"\x1f{g}" for s, g in zip(scenes, uniq.tolist())], str)
+    for kk in range(min(k, len(set(grp.tolist()))), 1, -1):
+        img_fold = np.full(len(uniq), -1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            splits = list(StratifiedGroupKFold(n_splits=kk, shuffle=True, random_state=seed)
+                          .split(np.zeros(len(uniq)), img_y, grp))
+        for f, (tr, te) in enumerate(splits):
+            if len(te) == 0 or len(set(img_y[tr].tolist())) < 2:
+                break
+            img_fold[te] = f
+        else:
+            lookup = dict(zip(uniq.tolist(), img_fold.tolist()))
+            return np.array([lookup[g] for g in d.groups.tolist()], int), kk
+    return None
+
+
+@dataclass
+class OofRun:
+    ids: list[str]  # images, sorted
+    y: np.ndarray  # image labels
+    s: np.ndarray  # out-of-fold image scores
+    mode: str  # "scene" = folds never split a scene | "image" = folds never split an image
+    k: int  # folds actually used
+    extra: dict[str, float] | None = None  # scores of the `extra` pictures, by image id
+    n_scenes: int = 0  # distinct scenes among the images
+    note: str = ""  # why scene grouping was not used although there are scenes
+
+
+def oof_run(d: ItemData, k: int, C: float, seed: int = 0, by: str = "auto",
+            extra: ItemData | None = None) -> OofRun:
+    """Out-of-fold image-level scores.
+
+    by: "scene" | "image" | "auto" = by scene when at least half of the images have one and there are >= 4
+    distinct scenes (and such folds exist), else by image. Image grouping lets a head learn the scene instead of
+    the defect whenever the pictures are scenes x seeds, so its numbers are optimistic then.
+    extra: unlabelled pictures (not part of d) to score with the fold models: only the model that never saw the
+    picture's scene when grouping by scene and that scene is in d, else the mean over all fold models."""
+    if by not in ("auto", "scene", "image"):
+        raise JudgeLabError(f"分组方式只能是 auto / scene / image，收到 {by!r}")
+    uniq, _, scenes = d.images()
+    n_with, distinct = sum(1 for x in scenes if x), len({x for x in scenes if x})
+    folds, mode, note = None, "image", ""
+    if by == "scene" and not distinct:
+        raise JudgeLabError("按场景分组需要场景信息：记录里没有 scene，文件名也不是「场景_s数字」的样子")
+    if by == "scene" or (by == "auto" and n_with * 2 >= len(uniq) and distinct >= 4):
+        got = scene_folds(d, k, seed)
+        if got is not None:
+            (folds, k), mode = got, "scene"
+        elif by == "scene":
+            raise JudgeLabError("按场景分不出每一折都同时有正例和反例的分组（正例或反例只出现在一个场景里）")
+        else:
+            note = "按场景分不出每一折都同时有正例和反例的分组"
+    elif by == "auto" and distinct:
+        note = "场景不到 4 个，或多数图没有场景"
+    if folds is None:
+        folds = grouped_folds(d.groups, d.y, k, seed)
+        k = len(np.unique(folds))
     crop_scores = np.zeros(len(d.y))
+    held_out: dict[str, int] = {}  # scene (or image id) -> the fold that never trained on it
+    if mode == "scene" and d.scenes is not None:
+        held_out = {s: int(f) for s, f in zip(d.scenes.tolist(), folds.tolist()) if s}
+    ex_fold = None
+    if extra is not None and len(extra.y):
+        ex_scenes = [""] * len(extra.y) if extra.scenes is None else extra.scenes.tolist()
+        ex_fold = np.array([held_out.get(s, -1) for s in ex_scenes], int)  # -1: every fold model may score it
+    ex_scores: dict[str, list[float]] = {}
     for f in np.unique(folds):
         te = folds == f
         coef, b = fit_linear(d.X[~te], d.y[~te], C, None if d.w is None else d.w[~te])
         crop_scores[te] = predict_proba(d.X[te], coef, b)
+        if ex_fold is not None:
+            m = (ex_fold == f) | (ex_fold == -1)
+            for iid, (sc, _) in image_max(predict_proba(extra.X[m], coef, b), extra.groups[m]).items():
+                ex_scores.setdefault(iid, []).append(sc)
     agg = image_max(crop_scores, d.groups)
     labels = dict(zip(d.groups.tolist(), d.y.tolist()))
     ids = sorted(agg)
-    return ids, np.array([labels[i] for i in ids]), np.array([agg[i][0] for i in ids])
+    return OofRun(ids, np.array([labels[i] for i in ids]), np.array([agg[i][0] for i in ids]), mode, int(k),
+                  None if extra is None else {i: float(np.mean(v)) for i, v in ex_scores.items()}, distinct, note)
 
 
-def permuted(d: ItemData, seed: int) -> ItemData:
-    """Same crops, image-level labels shuffled between images: the score a head reaches when labels mean nothing."""
+def oof_scores(d: ItemData, k: int, C: float, seed: int = 0) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Out-of-fold image-level scores, grouping chosen automatically. Returns (image_ids, labels, scores)."""
+    run = oof_run(d, k, C, seed)
+    return run.ids, run.y, run.s
+
+
+def permuted(d: ItemData, seed: int, within_scene: bool = True) -> ItemData:
+    """Same crops, image-level labels shuffled between images: the score a head reaches when labels mean nothing.
+    within_scene (and the data has scenes): labels move only between pictures of the SAME scene, so every scene
+    keeps its share of positives and only what tells pictures apart inside a scene is destroyed. Pictures with no
+    scene, or alone in theirs, are shuffled among themselves."""
+    from collections import Counter
     from dataclasses import replace
 
     rng = np.random.default_rng(seed)
-    uniq, first = np.unique(d.groups, return_index=True)
-    img_y = d.y[first].copy()
-    rng.shuffle(img_y)
+    uniq, img_y, scenes = d.images()
+    img_y = img_y.copy()
+    if within_scene and any(scenes):
+        size = Counter(x for x in scenes if x)
+        pool = np.array([x if x and size[x] > 1 else "" for x in scenes], str)
+        for x in sorted(set(pool.tolist())):
+            idx = np.flatnonzero(pool == x)
+            img_y[idx] = rng.permutation(img_y[idx])
+    else:
+        rng.shuffle(img_y)
     lookup = dict(zip(uniq.tolist(), img_y.tolist()))
     return replace(d, y=np.array([lookup[g] for g in d.groups.tolist()], int), w=None)
+
+
+def scene_only_auc(d: ItemData) -> float | None:
+    """How well the scene alone predicts the label, without looking at any picture: each image is scored by the
+    positive rate of the OTHER images of its scene (an image alone in its scene, or without one: the overall rate
+    without it). Leave-one-out pulls this below 0.5 when the scene tells nothing, so a value near the head's own
+    AUC is a real warning. None with a single class, or when fewer than two scenes exist (nothing to compare)."""
+    _, y, scenes = d.images()
+    y = y.astype(float)
+    if len(set(y.tolist())) < 2 or len({x for x in scenes if x}) < 2:
+        return None
+    total: dict[str, list[float]] = {}
+    for x, v in zip(scenes, y.tolist()):
+        if x:
+            t = total.setdefault(x, [0.0, 0.0])
+            t[0] += v
+            t[1] += 1
+    pred = [(total[x][0] - v) / (total[x][1] - 1) if x and total[x][1] > 1 else (y.sum() - v) / (len(y) - 1)
+            for x, v in zip(scenes, y.tolist())]
+    return auc(y.astype(int), np.array(pred))
 
 
 # --------------------------------------------------------------------------- metrics
@@ -234,9 +357,9 @@ def save_head(heads_dir: Path, item: HeadItem, coef, intercept, train_ids: list[
     heads_dir = Path(heads_dir)
     heads_dir.mkdir(parents=True, exist_ok=True)
     version = max(head_versions(heads_dir, item.id), default=0) + 1
-    meta = {
-        **meta, "item": item.id, "name": item.name, "kind": item.kind, "region": item.region,
-        "fallback_region": item.fallback_region, "version": version,
+    meta = {  # public_name: a private reason's real name is never written into a head file
+        **meta, "item": item.id, "name": item.public_name, "kind": item.kind, "region": item.region,
+        "fallback_region": item.fallback_region, "version": version, "private": item.private,
         "data_hash": sha256_ids(train_ids), "created_at": now_iso(),
     }
     path = heads_dir / f"{file_stem(item.id)}_v{version}.npz"
@@ -247,6 +370,8 @@ def save_head(heads_dir: Path, item: HeadItem, coef, intercept, train_ids: list[
     entry = {"file": path.name, **{k: meta[k] for k in (
         "version", "backbone", "model_id", "region", "fallback_region", "kind", "name",
         "n_pos", "n_neg", "data_hash", "created_at")}}
+    if item.private:
+        entry["private"] = True
     rec = manifest["items"].setdefault(item.id, {"active": None, "history": []})
     rec["active"] = entry
     rec["history"].append(entry)

@@ -59,6 +59,7 @@ def make_dataset(root: Path, n: int = N_IMAGES, seed: int = 42) -> dict:
             "image": f"images/{iid}.png",
             "decision": "fail" if reasons else "pass",
             "reasons": reasons,
+            "reasons_complete": True,  # synthetic labels are complete: an unselected reason really is absent
             "scores": scores,
             "recipe_hash": f"r{i % 5}",
             "versions": {"lora": "mark_taste_v1" if i < 60 else "mark_taste_v2"},

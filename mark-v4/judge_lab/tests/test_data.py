@@ -14,15 +14,18 @@ def item(iid="lighting", kind="score", trainable=True, max_score=None):
     return HeadItem(iid, iid, kind, "full", None, trainable, rule, 0.8)
 
 
-def rev(decision, reasons=(), scores=None):
-    return Review("x", None, decision, list(reasons), scores or {})
+def rev(decision, reasons=(), scores=None, **kw):
+    return Review("x", None, decision, list(reasons), scores or {}, **kw)
 
 
 def test_label_rules_default():
     it = item()
     assert label_for(rev("pass"), it) == 0
     assert label_for(rev("pass", ["lighting"]), it) == 0  # pass wins
-    assert label_for(rev("fail", ["structure_break"]), it) == 0  # not selected -> OK
+    # failed for another reason: the owner usually clicks only the most obvious one, so this is unknown ...
+    assert label_for(rev("fail", ["structure_break"]), it) is None
+    # ... unless the record says every applicable reason was selected
+    assert label_for(rev("fail", ["structure_break"], reasons_complete=True), it) == 0
     assert label_for(rev("fail", ["lighting"]), it) == 1
     assert label_for(rev("fail", ["lighting"], {"lighting": 9}), it) == 1  # no max_score -> selected = positive
 

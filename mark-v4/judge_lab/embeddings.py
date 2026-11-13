@@ -2,6 +2,8 @@
 
 Crop sources, per image and region:
   1. pre-made crops  <crops_root>/<image_id>/<region>_<k>.(png|jpg|jpeg|webp)
+                     (also looked up under the id derived from the image path, '<folder>__<file stem>':
+                      the review page's newer records carry an id of their own, older crop folders do not know it)
   2. fallback        full -> the whole image; tile -> a 2x2 grid of the image
   3. otherwise none  (face/hand/body need the owner's pipeline crops; a head may set
                       fallback_region, e.g. body -> full)
@@ -21,6 +23,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from .backbones import BackboneSpec
+from .data import derive_id
 from .util import JudgeLabError, now_iso
 
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp")
@@ -51,20 +54,23 @@ def grid_tiles(img: Image.Image, n: int = 2) -> list[tuple[str, Image.Image]]:
     return out
 
 
-def premade_crops(crops_root: Path | None, image_id: str, region: str) -> list[Path]:
+def premade_crops(crops_root: Path | None, image_id: str, region: str, image_path: Path | None = None) -> list[Path]:
+    """Pre-made crops of one image: the folder named by its id, else the folder named by its path-derived id."""
     if not crops_root:
         return []
-    d = Path(crops_root) / image_id
-    if not d.is_dir():
-        return []
     pat = re.compile(rf"^{re.escape(region)}_(\d+)\.(png|jpe?g|webp)$", re.IGNORECASE)
-    found = [(int(m.group(1)), p) for p in d.iterdir() if (m := pat.match(p.name))]
-    return [p for _, p in sorted(found)]
+    for name in dict.fromkeys([image_id] + ([derive_id(image_path)] if image_path is not None else [])):
+        d = Path(crops_root) / name
+        if name and d.is_dir():
+            found = [(int(m.group(1)), p) for p in d.iterdir() if (m := pat.match(p.name))]
+            if found:
+                return [p for _, p in sorted(found)]
+    return []
 
 
 def region_crops(image_id: str, image_path: Path | None, region: str, crops_root: Path | None):
     """Return [(crop_name, PIL image)] for one image and region (may be empty)."""
-    pre = premade_crops(crops_root, image_id, region)
+    pre = premade_crops(crops_root, image_id, region, image_path)
     if pre:
         return [(p.name, open_rgb(p)) for p in pre]
     if region not in ("full", "tile"):
@@ -139,7 +145,8 @@ def save_region_cache(path: Path, c: RegionCache) -> None:
 
 
 def compute_region(spec: BackboneSpec, region: str, items: list[tuple[str, Path | None]], crops_root):
-    """Embed all crops of `items` for one region. Returns (emb, ids, names, done_ids, errors)."""
+    """Embed all crops of `items` for one region. Returns (emb, ids, names, done_ids, errors),
+    errors being (image_id, message) pairs."""
     bs = max(1, spec.batch_size)
     embs, ids, names, done, errors = [], [], [], set(), []
     buf: list[tuple[str, str, Image.Image]] = []
@@ -155,7 +162,7 @@ def compute_region(spec: BackboneSpec, region: str, items: list[tuple[str, Path 
         try:
             crops = region_crops(iid, path, region, crops_root)
         except (OSError, FileNotFoundError) as e:
-            errors.append(f"{iid}: {e}")
+            errors.append((iid, str(e)))
             continue
         buf.extend((iid, n, im) for n, im in crops)
         done.add(iid)
@@ -173,8 +180,11 @@ def ensure_embeddings(
     cache_dir: Path,
     crops_root: Path | None = None,
     force: bool = False,
+    hide=(),
 ) -> dict[str, RegionCache]:
-    """Load the cache for each region and embed only the ids not processed yet."""
+    """Load the cache for each region and embed only the ids not processed yet.
+    hide: ids of private records; a failure on one of them is counted, never printed."""
+    hide = set(hide)
     out = {}
     for region in sorted(set(regions)):
         path = cache_file(cache_dir, spec.name, region)
@@ -191,8 +201,11 @@ def ensure_embeddings(
             cache.meta = {"backbone": spec.name, "model_id": spec.model_id, "region": region,
                           "dim": int(cache.emb.shape[1]) if cache.emb.size else 0, "updated_at": now_iso()}
             save_region_cache(path, cache)
-            for e in errors[:5]:
-                print(f"  [embed] 跳过 {e}")
+            shown = [(i, e) for i, e in errors if i not in hide]
+            for i, e in shown[:5]:
+                print(f"  [embed] 跳过 {i}: {e}")
+            if len(shown) < len(errors):
+                print(f"  [embed] 另有 {len(errors) - len(shown)} 张私有记录的图没处理成（不显示）")
             print(f"[embed] {spec.name}/{region}: 新处理 {len(done)} 张 → {len(ids)} 个裁剪；"
                   f"已有缓存 {len(items) - len(missing)} 张；失败 {len(errors)} 张")
         else:

@@ -1,6 +1,6 @@
 {
   "version": "heads_v1",
-  "_comment": "kind: hard = 硬门槛（不合格无分数）; score = 评分项（0-10 分）。region: face|hand|body|tile|full。label_rule.max_score 为 null 时，勾选即为缺陷；设为数字（如 4）时，勾选且分数 <= 该值才算缺陷，勾选但分数更高的样本排除。trainable=false 的项目不自动训练，但仍出现在报告中。",
+  "_comment": "kind: hard = 硬门槛（不合格无分数）; score = 评分项（0-10 分）。region: face|hand|body|tile|full。label_rule.max_score 为 null 时，勾选即为缺陷；设为数字（如 4）时，勾选且分数 <= 该值才算缺陷，勾选但分数更高的样本排除。trainable=false 的项目不自动训练，但仍出现在报告中。标注口径（不过但没选的原因、整屏通过、自动带过来的原因各算多少分量）可以写在 defaults.label_policy 里，或写进某一项的 label_rule；四个旋钮和默认值见 README「标注口径」。某一项加 \"private\": true 后，它的名字不会出现在任何输出里。",
   "defaults": {
     "target_recall": {"hard": 0.95, "score": 0.80}
   },

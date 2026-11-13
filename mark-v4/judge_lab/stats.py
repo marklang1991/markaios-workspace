@@ -65,8 +65,16 @@ def _tally(reviews, key_fn):
 
 
 def ab_report(reviews: list[Review], group_by: str, scene_field: str | None = "scene",
-              baseline: str | None = None, tolerance: float = 0.05, alpha: float = 0.05) -> dict:
+              baseline: str | None = None, tolerance: float = 0.05, alpha: float = 0.05,
+              private_scene: str | None = "（私有记录）") -> dict:
+    """private_scene: records from a private log are pooled under this label in the per-scene table (a scene
+    name comes from the file name, which must not be shown); None = show their real scene."""
     z = z_for(alpha)
+
+    def scene_of(r):
+        if private_scene and r.private:
+            return private_scene
+        return str(r.get(scene_field, "(无场景)"))
 
     def group(r):
         g = r.get(group_by)
@@ -99,8 +107,7 @@ def ab_report(reviews: list[Review], group_by: str, scene_field: str | None = "s
         res["comparisons"][g] = {"diff": d, "ci": [lo, hi], "z": zs, "p_value": p}
 
     if scene_field:
-        scenes = _tally(reviews, lambda r: (None if group(r) is None else
-                                            (str(r.get(scene_field, "(无场景)")), group(r))))
+        scenes = _tally(reviews, lambda r: None if group(r) is None else (scene_of(r), group(r)))
         for (scene, g), (k, n) in sorted(scenes.items()):
             entry = res["scenes"].setdefault(scene, {"groups": {}, "vs_baseline": {}})
             entry["groups"][g] = rate(k, n)

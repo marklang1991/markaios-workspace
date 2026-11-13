@@ -27,12 +27,13 @@ def sha256_ids(ids: Iterable[str]) -> str:
     return hashlib.sha256("\n".join(sorted(ids)).encode("utf-8")).hexdigest()
 
 
-def assert_no_exam(ids: Iterable[str], exam_ids: set[str], where: str) -> None:
+def assert_no_exam(ids: Iterable[str], exam_ids: set[str], where: str, hide: Iterable[str] = ()) -> None:
+    """hide: ids of private records; they are counted in the error but never printed."""
     leaked = sorted(set(ids) & exam_ids)
     if leaked:
-        raise ExamLeakError(
-            f"{where}: {len(leaked)} 个考卷 id 混入了训练/拟合数据 (例如 {leaked[:5]})。考卷永不训练。"
-        )
+        shown = [i for i in leaked if i not in set(hide)][:5]
+        eg = f" (例如 {shown})" if shown else "（私有记录，不显示）"
+        raise ExamLeakError(f"{where}: {len(leaked)} 个考卷 id 混入了训练/拟合数据{eg}。考卷永不训练。")
 
 
 def read_json(path: Path) -> Any:
