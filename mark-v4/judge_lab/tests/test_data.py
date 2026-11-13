@@ -90,3 +90,17 @@ def test_field_map(tmp_path):
     fm_path.write_text(json.dumps({"bogus": "x"}), encoding="utf-8")
     with pytest.raises(JudgeLabError):
         FieldMap.load(fm_path)
+
+
+def test_new_item_ignores_reviews_before_it_existed():
+    it = item("layer_seam", kind="hard")
+    it.added_at = "2026-11-13T10:00:00+00:00"
+    before = Review("a", None, "pass", [], {}, reviewed_at="2026-11-12T23:00:00+00:00")
+    untimed = Review("b", None, "pass", [], {})
+    after_ok = Review("c", None, "pass", [], {}, reviewed_at="2026-11-13T10:05:00Z")
+    after_bad = Review("d", None, "fail", ["layer_seam"], {}, reviewed_at="2026-11-13T11:00:00")
+    assert label_for(before, it) is None      # could not have been selected yet
+    assert label_for(untimed, it) is None     # unknown time -> excluded, never a false negative
+    assert label_for(after_ok, it) == 0
+    assert label_for(after_bad, it) == 1
+    assert label_counts([before, untimed, after_ok, after_bad], it) == {"pos": 1, "neg": 1, "ambiguous": 2}

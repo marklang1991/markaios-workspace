@@ -405,6 +405,45 @@ def cmd_stats_n(args) -> None:
           f"{' (单侧)' if args.one_sided else ' (双侧)'}: 每组至少 {n} 张，共 {2 * n} 张")
 
 
+
+# --------------------------------------------------------------------------- items (owner's defect list)
+def cmd_items_list(args) -> None:
+    """Per item: how many owner labels exist (exam excluded) and whether a head can be trained yet."""
+    reviews = load_log(args.log, FieldMap.load(args.field_map))
+    train, _, summary = split_exam(reviews, load_exam(args.exam))
+    items, _ = load_config(args.config)
+    rows = []
+    for it in items.values():
+        c = label_counts(train, it)
+        ready = it.trainable and c["pos"] >= args.min_pos and c["neg"] >= args.min_neg
+        state = "可训练" if ready else ("不自动训练" if not it.trainable else f"还差 {max(0, args.min_pos - c['pos'])} 个正例")
+        rows.append([it.id, it.name, it.kind, it.region, it.added_at or "-", c["pos"], c["neg"], c["ambiguous"],
+                     state, it.definition or "-"])
+    print(f"[数据] 训练池 {summary['train_pool']} 张（考卷不计）")
+    print(md_table(["id", "名称", "类型", "区域", "新增时间", "正例", "反例", "不计入", "状态", "定义"], rows))
+    print("\n说明: 新增项目只统计它创建之后审过的图；创建之前的图当时没有这个选项，不算反例。")
+
+
+def cmd_items_add(args) -> None:
+    """Append one owner-defined item to a head config (never edits the packaged default)."""
+    import re
+    if Path(args.config).resolve() == DEFAULT_CONFIG.resolve():
+        raise JudgeLabError("请用 --config 指定你自己的配置文件副本，不要改包内默认配置")
+    if not re.fullmatch(r"[a-z][a-z0-9_]{1,40}", args.id):
+        raise JudgeLabError("id 只能用小写字母、数字、下划线，例如 layer_seam")
+    data = read_json(args.config)
+    if args.id in data.get("items", {}):
+        raise JudgeLabError(f"项目 {args.id} 已存在")
+    entry = {"name": args.name, "kind": args.kind, "region": args.region,
+             "label_rule": {"positive_if": "selected"}, "added_at": args.added_at or now_iso(),
+             "definition": args.definition or ""}
+    if args.no_train:
+        entry["trainable"] = False
+    data.setdefault("items", {})[args.id] = entry
+    write_json(args.config, data)
+    load_config(args.config)  # validate
+    print(f"已加入 {args.id}（{args.name}，{args.kind}，区域 {args.region}，从 {entry['added_at']} 起计数）")
+
 # --------------------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m judge_lab", description="专科判官工具包 judge_lab " + __version__)
@@ -507,6 +546,27 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--alpha", type=float, default=0.05)
     n.add_argument("--one-sided", action="store_true")
     n.set_defaults(func=cmd_stats_n)
+
+    sp = sub.add_parser("items", help="主人的缺陷清单：查看样本数 / 新增项目")
+    isub = sp.add_subparsers(dest="items_cmd", required=True)
+    il = isub.add_parser("list", help="每个项目有多少正例/反例，够不够训练")
+    il.add_argument("--log", type=Path, required=True)
+    il.add_argument("--exam", type=Path)
+    il.add_argument("--field-map", type=Path)
+    il.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    il.add_argument("--min-pos", type=int, default=15)
+    il.add_argument("--min-neg", type=int, default=15)
+    il.set_defaults(func=cmd_items_list)
+    ia = isub.add_parser("add", help="把审片页新增的原因加进判官头配置")
+    ia.add_argument("--config", type=Path, required=True, help="你自己的配置副本（不能是包内默认）")
+    ia.add_argument("--id", required=True, help="英文 id，与审片页一致，例如 layer_seam")
+    ia.add_argument("--name", required=True, help="中文名，例如 图层割裂")
+    ia.add_argument("--kind", choices=["hard", "score"], required=True)
+    ia.add_argument("--region", choices=["face", "hand", "body", "tile", "full"], default="full")
+    ia.add_argument("--definition", help="一句话定义：什么样算这个问题")
+    ia.add_argument("--added-at", help="创建时间 ISO 格式（默认现在）")
+    ia.add_argument("--no-train", action="store_true", help="只记录，不训练判官头（例如语义类）")
+    ia.set_defaults(func=cmd_items_add)
     return p
 
 

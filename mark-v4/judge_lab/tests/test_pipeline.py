@@ -137,3 +137,29 @@ def test_score_shadow_only(run, ds):
     probs = np.array([r["scores"]["lighting"]["prob"] for r in lines[3:]])
     lit = np.array([i % 4 == 1 for i in range(120)])
     assert probs[lit].min() > probs[~lit].max()
+
+
+def test_items_add_and_list(tmp_path, capsys):
+    import json as _json
+    from judge_lab.cli import main
+    from judge_lab.data import DEFAULT_CONFIG
+    cfg = tmp_path / "heads.json"
+    cfg.write_text(DEFAULT_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    assert main(["items", "add", "--config", str(cfg), "--id", "layer_seam", "--name", "图层割裂",
+                 "--kind", "hard", "--region", "full", "--definition", "人物和背景像两张图拼起来",
+                 "--added-at", "2026-11-13T10:00:00+00:00"]) == 0
+    data = _json.loads(cfg.read_text(encoding="utf-8"))
+    assert data["items"]["layer_seam"]["definition"] == "人物和背景像两张图拼起来"
+    assert main(["items", "add", "--config", str(cfg), "--id", "layer_seam", "--name", "x", "--kind", "hard"]) == 2
+    assert main(["items", "add", "--config", str(DEFAULT_CONFIG), "--id", "zz_new", "--name", "x", "--kind", "hard"]) == 2
+    log = tmp_path / "log.jsonl"
+    rows = [{"id": "a", "decision": "pass", "reviewed_at": "2026-11-12T00:00:00Z"},
+            {"id": "b", "decision": "fail", "reasons": ["layer_seam"], "reviewed_at": "2026-11-13T12:00:00Z"},
+            {"id": "c", "decision": "pass", "reviewed_at": "2026-11-13T12:01:00Z"}]
+    log.write_text("\n".join(_json.dumps(r) for r in rows), encoding="utf-8")
+    capsys.readouterr()
+    assert main(["items", "list", "--log", str(log), "--config", str(cfg), "--min-pos", "1", "--min-neg", "1"]) == 0
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith("| layer_seam"))
+    cells = [c.strip() for c in line.strip("|").split("|")]
+    assert cells[5:9] == ["1", "1", "1", "可训练"]

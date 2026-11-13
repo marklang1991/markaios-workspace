@@ -12,7 +12,8 @@ from .util import JudgeLabError, read_json
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_DIR / "configs" / "heads_v1.json"
 
-CANONICAL_FIELDS = ("id", "image", "decision", "reasons", "scores", "recipe_hash", "versions", "scene")
+CANONICAL_FIELDS = ("id", "image", "decision", "reasons", "scores", "recipe_hash", "versions", "scene",
+                    "reviewed_at")
 REGIONS = ("face", "hand", "body", "tile", "full")
 KINDS = ("hard", "score")
 
@@ -62,6 +63,7 @@ class Review:
     versions: dict = field(default_factory=dict)
     scene: str | None = None
     raw: dict = field(default_factory=dict)
+    reviewed_at: str | None = None  # ISO time of the owner's verdict
 
     def get(self, path: str, default: Any = None) -> Any:
         """Dotted lookup; the first segment may be a canonical field (e.g. versions.lora)."""
@@ -123,6 +125,7 @@ def load_log(path: Path, field_map: FieldMap | None = None) -> list[Review]:
             versions = _get_path(rec, f["versions"])
             scene = _get_path(rec, f["scene"])
             recipe = _get_path(rec, f["recipe_hash"])
+            reviewed = _get_path(rec, f["reviewed_at"])
             by_id[str(rid)] = Review(
                 id=str(rid),
                 image=img_path,
@@ -133,6 +136,7 @@ def load_log(path: Path, field_map: FieldMap | None = None) -> list[Review]:
                 versions=versions if isinstance(versions, dict) else {},
                 scene=None if scene is None else str(scene),
                 raw=rec,
+                reviewed_at=None if reviewed is None else str(reviewed),
             )
     if bad:
         print(f"[log] 警告: {bad} 行无法解析或缺少 id/decision，已跳过")
@@ -176,6 +180,8 @@ class HeadItem:
     label_rule: dict
     target_recall: float
     note: str = ""
+    added_at: str | None = None  # when the owner created this item; earlier reviews could not select it
+    definition: str = ""  # the owner's one-line meaning, for humans and VLM prompts (heads learn from examples only)
 
 
 def load_config(path: Path | None = None) -> tuple[dict[str, HeadItem], dict]:
@@ -201,12 +207,33 @@ def load_config(path: Path | None = None) -> tuple[dict[str, HeadItem], dict]:
             label_rule=rule,
             target_recall=float(c.get("target_recall", recalls[kind])),
             note=c.get("note", ""),
+            added_at=c.get("added_at"),
+            definition=c.get("definition", ""),
         )
     return items, defaults
 
 
+def _parse_ts(v: str | None):
+    from datetime import datetime, timezone
+    if not v:
+        return None
+    try:
+        t = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def reviewed_after(reviewed_at: str | None, added_at: str) -> bool:
+    """True only when the verdict is known to be no earlier than the item's creation."""
+    r, a = _parse_ts(reviewed_at), _parse_ts(added_at)
+    return r is not None and a is not None and r >= a
+
+
 def label_for(review: Review, item: HeadItem) -> int | None:
     """1 = defect, 0 = OK, None = ambiguous (excluded).
+
+    item has added_at, review older / untimed -> None (the owner could not have picked it yet)
 
     pass                         -> 0
     fail, item not selected      -> 0  (unselected items default to OK)
@@ -215,6 +242,8 @@ def label_for(review: Review, item: HeadItem) -> int | None:
                                     selected without a score -> label_rule.missing_score
                                     ("positive" default, or "skip")
     """
+    if item.added_at and not reviewed_after(review.reviewed_at, item.added_at):
+        return None  # reviewed before the item existed (or no timestamp): the owner could not have selected it
     if review.decision == "pass" or item.id not in review.reasons:
         return 0
     max_score = item.label_rule.get("max_score")

@@ -28,7 +28,7 @@ pip install -r judge_lab/requirements-backbones.txt   # 真实骨干：torch + t
 **1. 审核日志 JSONL**（一行一张图）：
 
 ```json
-{"id": "img_0001", "image": "out/img_0001.png", "decision": "fail",
+{"id": "img_0001", "image": "out/img_0001.png", "decision": "fail", "reviewed_at": "2026-11-13T10:05:00-08:00",
  "reasons": ["structure_break", "lighting"], "scores": {"lighting": 3},
  "recipe_hash": "a1b2", "versions": {"lora": "mark_taste_v1"}, "scene": "indoor"}
 ```
@@ -56,6 +56,24 @@ pip install -r judge_lab/requirements-backbones.txt   # 真实骨干：torch + t
 - 评分项可以设 `"max_score": 4`：勾选且分数 ≤ 4 才算缺陷；勾选了但分数更高的样本不计入训练。
 - `trainable: false` 的项目不自动训练，但仍出现在报告里：年龄偏小 / 偏大由主人在审片页人工判断（暂不装年龄估计模型）；动作和分镜不符、物理不合理是语义判断，交给 VLM 审核。
 - 有的项目判官头只是辅助：乱码字主要靠 OCR；不是同一个人、像不像本人主要靠人脸特征相似度。
+
+## 新增原因项（审片页上的「+ 新增原因」）
+
+判官头不认识文字，只从你的例子里学：你在某个原因上点过的图是正例，之后审过、没点这个原因的图是反例。名称和定义是写给人和看图大模型看的。
+
+```bash
+# 把审片页新增的原因加进你自己的配置副本（不要改包内默认配置）
+python -m judge_lab items add --config my_heads.json --id layer_seam --name 图层割裂 \
+    --kind hard --region full --definition "人物和背景像两张图拼起来，光影或透视对不上" \
+    --added-at 2026-11-13T10:00:00-08:00
+
+# 每个项目现在有多少正例/反例、够不够训练
+python -m judge_lab items list --log data/review_log.jsonl --exam data/exam.txt --config my_heads.json
+```
+
+- **只统计新增之后审过的图。** 新增之前的图当时没有这个选项，不能当成“没有这个问题”，所以不计入（审核日志需要带 `reviewed_at` 时间字段）。
+- 正例攒到 `--min-pos`（默认 15）以上，`probe` / `train` 才会为它训练判官头。
+- 语义类、需要理解分镜的项目加 `--no-train`，交给看图大模型。
 
 ## 操作步骤
 
