@@ -6,4 +6,4 @@ Three rules (see README.md):
   3. Heads only output scores; they never make pass/fail decisions.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

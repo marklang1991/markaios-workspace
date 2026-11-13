@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .data import HeadItem, Review, label_for
+from .data import HeadItem, Review, label_for, severity_weight
 from .embeddings import RegionCache
 from .util import JudgeLabError, assert_no_exam, now_iso, read_json, sha256_ids, write_json
 
@@ -31,6 +31,7 @@ class ItemData:
     n_neg: int
     n_ambiguous: int
     n_no_crops: int
+    w: np.ndarray | None = None  # (n_crops,) fitting weight: the owner's severity score on positives
 
     @property
     def image_ids(self) -> list[str]:
@@ -56,7 +57,7 @@ def build_item_data(item: HeadItem, reviews: list[Review], caches: dict[str, Reg
                     exclude_ids: set[str] | None = None) -> ItemData:
     if exclude_ids:
         assert_no_exam((r.id for r in reviews), exclude_ids, f"build_item_data({item.id})")
-    Xs, ys, gs, ns = [], [], [], []
+    Xs, ys, gs, ns, ws = [], [], [], [], []
     pos = neg = amb = none = 0
     for r in reviews:
         lab = label_for(r, item)
@@ -72,13 +73,15 @@ def build_item_data(item: HeadItem, reviews: list[Review], caches: dict[str, Reg
         Xs.append(cache.emb[rows])
         ys += [lab] * len(rows)
         gs += [r.id] * len(rows)
+        ws += [severity_weight(r, item) if lab else 1.0] * len(rows)
         ns += cache.crop_names[rows].tolist()
     X = np.concatenate(Xs) if Xs else np.zeros((0, 0), np.float32)
-    return ItemData(X, np.array(ys, int), np.array(gs, str), np.array(ns, str), pos, neg, amb, none)
+    return ItemData(X, np.array(ys, int), np.array(gs, str), np.array(ns, str), pos, neg, amb, none,
+                    np.array(ws, float))
 
 
 # --------------------------------------------------------------------------- model
-def fit_linear(X: np.ndarray, y: np.ndarray, C: float) -> tuple[np.ndarray, float]:
+def fit_linear(X: np.ndarray, y: np.ndarray, C: float, sample_weight: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """Standardise + balanced logistic regression; the scaler is folded into (coef, intercept)
     so a head is just p = sigmoid(x @ coef + intercept) on the L2-normalised embedding."""
     from sklearn.linear_model import LogisticRegression
@@ -88,7 +91,7 @@ def fit_linear(X: np.ndarray, y: np.ndarray, C: float) -> tuple[np.ndarray, floa
     clf = LogisticRegression(C=C, class_weight="balanced", max_iter=5000)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        clf.fit((X - mu) / sd, y)
+        clf.fit((X - mu) / sd, y, sample_weight=sample_weight)
     w = clf.coef_[0] / sd
     b = float(clf.intercept_[0] - np.dot(w, mu))
     return w.astype(np.float32), b
@@ -131,12 +134,24 @@ def oof_scores(d: ItemData, k: int, C: float, seed: int = 0) -> tuple[list[str],
     crop_scores = np.zeros(len(d.y))
     for f in np.unique(folds):
         te = folds == f
-        coef, b = fit_linear(d.X[~te], d.y[~te], C)
+        coef, b = fit_linear(d.X[~te], d.y[~te], C, None if d.w is None else d.w[~te])
         crop_scores[te] = predict_proba(d.X[te], coef, b)
     agg = image_max(crop_scores, d.groups)
     labels = dict(zip(d.groups.tolist(), d.y.tolist()))
     ids = sorted(agg)
     return ids, np.array([labels[i] for i in ids]), np.array([agg[i][0] for i in ids])
+
+
+def permuted(d: ItemData, seed: int) -> ItemData:
+    """Same crops, image-level labels shuffled between images: the score a head reaches when labels mean nothing."""
+    from dataclasses import replace
+
+    rng = np.random.default_rng(seed)
+    uniq, first = np.unique(d.groups, return_index=True)
+    img_y = d.y[first].copy()
+    rng.shuffle(img_y)
+    lookup = dict(zip(uniq.tolist(), img_y.tolist()))
+    return replace(d, y=np.array([lookup[g] for g in d.groups.tolist()], int), w=None)
 
 
 # --------------------------------------------------------------------------- metrics
@@ -198,8 +213,17 @@ class Head:
         return predict_proba(X, self.coef, self.intercept)
 
 
+def file_stem(item_id: str) -> str:
+    """File name for an item's head. Ids from the review page are Chinese names with '/', spaces, brackets:
+    those get a short stable hash instead (the manifest and the head's meta keep the real id and name)."""
+    if re.fullmatch(r"[A-Za-z0-9_\-]+", item_id):
+        return item_id
+    import hashlib
+    return "h_" + hashlib.sha1(item_id.encode("utf-8")).hexdigest()[:10]
+
+
 def head_versions(heads_dir: Path, item_id: str) -> list[int]:
-    pat = re.compile(rf"^{re.escape(item_id)}_v(\d+)\.npz$")
+    pat = re.compile(rf"^{re.escape(file_stem(item_id))}_v(\d+)\.npz$")
     d = Path(heads_dir)
     return sorted(int(m.group(1)) for p in d.glob("*.npz") if (m := pat.match(p.name))) if d.is_dir() else []
 
@@ -215,7 +239,7 @@ def save_head(heads_dir: Path, item: HeadItem, coef, intercept, train_ids: list[
         "fallback_region": item.fallback_region, "version": version,
         "data_hash": sha256_ids(train_ids), "created_at": now_iso(),
     }
-    path = heads_dir / f"{item.id}_v{version}.npz"
+    path = heads_dir / f"{file_stem(item.id)}_v{version}.npz"
     with open(path, "wb") as fh:
         np.savez(fh, coef=np.asarray(coef, np.float32), intercept=np.array(float(intercept)),
                  train_ids=np.array(sorted(train_ids), str), meta=np.array(json.dumps(meta, ensure_ascii=False)))
